@@ -167,7 +167,6 @@ central_coordinates:
 	lw $s5, padding	
 	
 colors_and_iterations:	
-
 	li $t7, 0xFF
 	li $t6, 0x99 
 
@@ -194,9 +193,7 @@ width_alg_loop:
 	mov.d $f18, $f26
 	li $s1, 0
 	
-algorythm:	
-	addi $s1, $s1, 1
-	beq $s1, $2, black_pix	
+algorythm:
 
 	mul.d $f22, $f26, $f28	# zIR (with i)
 	add.d $f22, $f22, $f22	# 2zIR
@@ -209,13 +206,21 @@ algorythm:
 	add.d $f22, $f18, $f20	# zI^2+zC^2
 	sqrt.d $f22, $f22	# sqrt (zI^2+zC^2)
 	
+	addi $s1, $s1, 1
+	beq $s1, $2, black_pix	
+	
 	l.d $f24, escape
 	c.lt.d 	 $f22, $f24
 	bc1t algorythm
 		
 	blt $s1, $s7, blue_pix
 	blt $s1, $s3, white_pix
-	j pink_pix	
+	
+pink_pix:
+	sb $t7,  0($t9)
+	sb $t6, 1($t9)
+	sb $t7, 2($t9)
+	j next				
 
 blue_pix:
 	sb $t7,0($t9)
@@ -227,12 +232,6 @@ white_pix:
 	sb $t7, 0($t9)
 	sb $t7, 1($t9)
 	sb $t7, 2($t9)	
-	j next	
-
-pink_pix:
-	sb $t7,  0($t9)
-	sb $t6, 1($t9)
-	sb $t7, 2($t9)
 	j next	
 			
 black_pix:
