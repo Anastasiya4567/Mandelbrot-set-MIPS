@@ -1,0 +1,278 @@
+		.data
+start_byte:	.space 4
+size:		.space 4 	# the whole size of bmp file in pixels
+offset:		.space 4 	# 
+width:		.space 4  	# in pixels
+width_pad:	.space 4 	# in pixels wih padding
+height:		.space 4 	# in pixels
+x0:		.double	0	# central x coordination
+y0:		.double	0	# central y coordination
+zeroDouble:	.double	0	# real
+center:		.double 2
+r2:		.double 3
+escape:		.double 2	
+padding:	.space 4 	# the number of padding bytes in a row
+		.align 2
+header:		.space 54
+
+width_in:	.asciiz "Enter the width of the bitmape (in pixels):\n"
+height_in:	.asciiz "Enter the height of the bitmape (in pixels):\n"
+
+intro:		.asciiz	"Mandelbrot set project\n"
+error_output:	.asciiz "Error connectes with openning output bmp file\n"
+output:		.asciiz "output.bmp"
+		.text
+		
+# Registers:
+# $t0 - file desriptor 
+# $t1, $t2 - temp
+# $t3 - header pointer
+# $t4 - $t9 - temp
+# $s0 - $s0 - temp
+	
+	.globl main
+				
+main:	
+	la $a0, intro	# print an intro message on the screen
+	li $v0, 4
+	syscall
+	
+# Bitmape file contains a header of 54 bytes (14+40):
+# 2-6 - size (in bytes)
+# 18-22 - width (in pixels)
+# 22-26 - height (in pixels)
+# After the header there is data section, containing information on pixels' colours
+
+get_width_from_user:	
+	li $v0, 4
+	la $a0, width_in
+	syscall	
+	
+	li $v0, 5	#read integer
+	syscall
+	sw $v0, width
+
+get_height_from_user:	
+	li $v0, 4
+	la $a0, height_in
+	syscall	
+	
+	li $v0, 5	#read integer
+	syscall
+	sw $v0, height
+
+open_output_file:
+	la $a0, output	
+	li $a1, 1	# create if it doesn't exist and open
+	li $a2, 0	# mode is ignored  
+	li $v0, 13	# open file
+	syscall	
+	
+	bltz $v0, error_output_message	
+	
+	move $t0, $v0
+
+	la $t3, header
+
+make_header:
+	li $t1, 0x42
+	sb $t1, 0($t3)
+	li $t1, 0x4D
+	sb $t1, 1($t3)
+	li $t1, 0x36
+	sb $t1, 10($t3)
+	li $t1, 0x28
+	sb $t1, 14($t3)
+	li $t1, 0x18
+	sb $t1, 28($t3)
+			
+copy_parametres:
+	lw  $t1, height
+	usw $t1, 22($t3)
+	lw $t2, width		# write user width to the header 
+	usw  $t2, 18($t3)
+	mul $t5, $t2, $t1
+	
+	mul $t5, $t5, 3
+	sw $t5, size		# size (in bytes)
+	
+check_padding:
+	mul $t4, $t2, 3		 # height(in pixels)*3/4 = height (in bytes)
+	andi $t4, $t4, 0x00000003 # mod 4	
+	beqz $t4, store_padding
+	li $t9, 4
+	sub $t4, $t9, $t4
+	
+store_padding:
+	sw $t4, padding	
+	add $t9, $t4, $t2	 # add padding and width
+	sw $t9, width_pad
+	beqz $t4, no_padding
+	
+count_whole_size:	
+	mul $t6, $t4, $t1	# padding*height
+	add $t2, $t5, $t6	# size+empty pixels
+	sw $t2, size
+	move $t5, $t2
+	
+no_padding:
+	addi $t5, $t5, 54
+	
+save_whole_size:
+	usw $t5, 2($t3) #save whole size to the header (header size + padding*width + active pixels)
+				
+memory_allocation:
+	move $a0, $t2	# number of bytes to allocate
+	li $v0, 9	# allocate heap memory
+	syscall
+	sw  $v0, start_byte
+					
+write_header:
+	move $a0, $t0		
+	la $a1, header			
+	li $a2, 54		# number of characters to read		
+	li $v0, 15		# read from file
+	syscall
+	
+	bltz $v0, error_output_message	
+	
+	move $t3, $v0	
+			
+	l.d  $f4, center 
+	lw  $t9, width
+	mtc1 $t9, $f0
+	lw  $t8, height
+	mtc1 $t8, $f2
+
+central_coordinates:
+	cvt.d.w $f0, $f0 	# width (double)
+	cvt.d.w $f2, $f2 	# height (double)
+	
+	l.d $f6, r2
+	div.d $f4, $f6, $f0	# x_scale
+	div.d $f6, $f6, $f2	# y_scale
+	
+	l.d $f8, center
+	
+	div.d $f0, $f0, $f8 	# x0
+	div.d $f16, $f0, $f8
+	add.d $f0, $f0, $f16
+	div.d $f2, $f2, $f8	# y0	
+	
+	lw $t2, height
+	lw $t1, width
+	li $t5, 0	# y counter
+	
+	lw $t9, start_byte
+	lw $s5, padding	
+	
+colors_and_iterations:	
+
+	li $t7, 0xFF
+	li $t6, 0x99 
+
+	li $s2, 25 # number of iterations for black
+	li $s3, 22 # number of iterations for pink
+	li $s7, 16
+	
+height_alg_loop:	
+	li $t4, 0	# x counter
+	mtc1.d $t5, $f14 
+	cvt.d.w $f14, $f14 	
+	sub.d  $f10, $f2, $f14	# y0-y 
+	mul.d $f10, $f6, $f10	# (y0-y)*y_scale
+	
+width_alg_loop:
+	mtc1.d  $t4, $f16
+	cvt.d.w $f16, $f16 	
+	sub.d $f12, $f16, $f0	# x-x0
+	mul.d $f12, $f12, $f4	# (x-x0)*x_scale
+	
+	l.d $f26, zeroDouble
+	mov.d $f28, $f26
+	mov.d $f20, $f26
+	mov.d $f18, $f26
+	li $s1, 0
+	
+algorythm:	
+	addi $s1, $s1, 1
+	beq $s1, $2, black_pix	
+
+	mul.d $f22, $f26, $f28	# zIR (with i)
+	add.d $f22, $f22, $f22	# 2zIR
+	sub.d $f24, $f18, $f20	# zR^2+zI^2 = zR
+	add.d $f26, $f24, $f12	# zR + C(x)
+	add.d $f28, $f22, $f10	# 2zIR+C(y)
+	
+	mul.d $f18, $f26, $f26	# zR^2
+	mul.d $f20, $f28, $f28	# zI^2
+	add.d $f22, $f18, $f20	# zI^2+zC^2
+	sqrt.d $f22, $f22	# sqrt (zI^2+zC^2)
+	
+	l.d $f24, escape
+	c.lt.d 	 $f22, $f24
+	bc1t algorythm
+		
+	blt $s1, $s7, blue_pix
+	blt $s1, $s3, white_pix
+	j pink_pix	
+
+blue_pix:
+	sb $t7,0($t9)
+	sb $0, 1($t9)
+	sb $0, 2($t9)
+	j next
+	
+white_pix:
+	sb $t7, 0($t9)
+	sb $t7, 1($t9)
+	sb $t7, 2($t9)	
+	j next	
+
+pink_pix:
+	sb $t7,  0($t9)
+	sb $t6, 1($t9)
+	sb $t7, 2($t9)
+	j next	
+			
+black_pix:
+	sb $0, 0($t9)
+	sb $0, 1($t9)
+	sb $0, 2($t9)
+next:
+	addi $t9, $t9, 3
+	addi $t4, $t4, 1
+	blt $t4, $t1, width_alg_loop
+	
+eliminate_padding:
+	move $s6, $s5 	#copy padding length to s6
+pad_loop:
+	beqz $s6, end_line 	#if whole padding filled, end loop
+	sb $zero, 0($t9)	 
+	addi $t9, $t9, 1	#inc memory pointer
+	addi $s6, $s6, -1	#dec padding counter
+	j pad_loop
+end_line:																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																	
+	addi $t5, $t5, 1
+	blt $t5, $t2, height_alg_loop
+ 	 	 
+print_picture:
+	move $a0, $t0		
+	lw $a1, start_byte			
+	lw $a2, size		# number of characters to write		
+	li $v0, 15		# write to file
+	syscall
+
+close_output_file:
+	move $a0, $t0
+	li $v0, 16	# close
+	syscall
+
+end:	li $v0, 10
+	syscall
+	
+error_output_message:
+	la $a0, error_output
+	li $v0, 4
+	syscall
+	j end	
